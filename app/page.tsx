@@ -14,6 +14,9 @@ import { Spinner } from '@/components/ui/spinner';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { X } from 'lucide-react';
+import { MaxFileSizes } from '@/lib/consts';
+import { helperService } from '@/lib/services';
+import { baseService } from '@/lib/services/base.service';
 
 export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -21,6 +24,7 @@ export default function Home() {
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const socketRef = useRef<Socket>(null);
   const pcRef = useRef<RTCPeerConnection>(null);
+  const [isUploading, setIsUploading] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [showCam, setShowCam] = useState<boolean>(false);
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
@@ -75,12 +79,43 @@ export default function Home() {
 
   const onStartRecord = () => {};
 
+  const onFileUpload = async () => {
+    if (selectedFile) {
+      setIsUploading(true);
+      const res = await baseService.processVideo(selectedFile);
+      if (res) {
+        setShowCam(true);
+
+        setTimeout(() => {
+          if (remoteVideoRef.current) {
+            console.log(res);
+            const videoUrl = URL.createObjectURL(res);
+            console.log(videoUrl);
+            remoteVideoRef.current.src = URL.createObjectURL(res);
+            remoteVideoRef.current.load();
+          }
+        }, 100);
+      }
+      setIsUploading(false);
+    }
+  };
+
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0] || null;
-    setSelectedFile(file);
+    if (!file) {
+      setSelectedFile(null);
+      return;
+    }
 
-    // TODO добавить проверку размера и типа файла
-    // TODO добавить тост уведомления
+    const validationResult = helperService.checkVideoFile(file, MaxFileSizes.video);
+    if (!validationResult.isValid) {
+      alert(validationResult.error);
+      setSelectedFile(null);
+      event.target.value = '';
+      return;
+    }
+
+    setSelectedFile(file);
   };
 
   const clearFileInput = () => {
@@ -91,62 +126,52 @@ export default function Home() {
   };
 
   const initWebRTC = async () => {
-    socketRef.current = io('http://localhost:3000');
-    socketRef.current.emit('join-stream', 'ml-stream');
-
-    pcRef.current = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
-    });
-
-    stream?.getTracks().forEach((track) => {
-      pcRef.current?.addTrack(track, stream);
-    });
-
-    pcRef.current.ontrack = (event) => {
-      if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = event.streams[0];
-      }
-    };
-
-    // Обработка ICE кандидатов
-    pcRef.current.onicecandidate = (event) => {
-      if (event.candidate) {
-        socketRef.current.emit('ice-candidate', {
-          candidate: event.candidate,
-          streamId: 'ml-stream',
-        });
-      }
-    };
-
-    // Сигнальные сообщения
-    socketRef.current.on('offer', async (data) => {
-      await pcRef.current.setRemoteDescription(data.offer);
-      const answer = await pcRef.current.createAnswer();
-      await pcRef.current.setLocalDescription(answer);
-
-      if (!socketRef.current) return;
-      socketRef.current.emit('answer', {
-        answer: answer,
-        streamId: 'ml-stream',
-      });
-    });
-
-    socketRef.current.on('answer', async (data) => {
-      await pcRef.current.setRemoteDescription(data.answer);
-    });
-
-    socketRef.current.on('ice-candidate', async (data) => {
-      await pcRef.current.addIceCandidate(data.candidate);
-    });
-
-    // Создаем офер
-    const offer = await pcRef.current.createOffer();
-    await pcRef.current.setLocalDescription(offer);
-
-    socketRef.current.emit('offer', {
-      offer: offer,
-      streamId: 'ml-stream',
-    });
+    // socketRef.current = io('http://localhost:3000');
+    // socketRef.current.emit('join-stream', 'ml-stream');
+    // pcRef.current = new RTCPeerConnection({
+    //   iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+    // });
+    // stream?.getTracks().forEach((track) => {
+    //   pcRef.current?.addTrack(track, stream);
+    // });
+    // pcRef.current.ontrack = (event) => {
+    //   if (remoteVideoRef.current) {
+    //     remoteVideoRef.current.srcObject = event.streams[0];
+    //   }
+    // };
+    // // Обработка ICE кандидатов
+    // pcRef.current.onicecandidate = (event) => {
+    //   if (event.candidate) {
+    //     socketRef.current.emit('ice-candidate', {
+    //       candidate: event.candidate,
+    //       streamId: 'ml-stream',
+    //     });
+    //   }
+    // };
+    // // Сигнальные сообщения
+    // socketRef.current.on('offer', async (data) => {
+    //   await pcRef.current.setRemoteDescription(data.offer);
+    //   const answer = await pcRef.current.createAnswer();
+    //   await pcRef.current.setLocalDescription(answer);
+    //   if (!socketRef.current) return;
+    //   socketRef.current.emit('answer', {
+    //     answer: answer,
+    //     streamId: 'ml-stream',
+    //   });
+    // });
+    // socketRef.current.on('answer', async (data) => {
+    //   await pcRef.current.setRemoteDescription(data.answer);
+    // });
+    // socketRef.current.on('ice-candidate', async (data) => {
+    //   await pcRef.current.addIceCandidate(data.candidate);
+    // });
+    // // Создаем офер
+    // const offer = await pcRef.current.createOffer();
+    // await pcRef.current.setLocalDescription(offer);
+    // socketRef.current.emit('offer', {
+    //   offer: offer,
+    //   streamId: 'ml-stream',
+    // });
   };
 
   useEffect(() => {
@@ -173,7 +198,10 @@ export default function Home() {
           {!showCam ? (
             <div className="flex flex-col gap-4">
               {devices.length ? (
-                <Select value={selectedDevice} onValueChange={(value) => setSelectedDevice(value)}>
+                <Select
+                  value={selectedDevice}
+                  onValueChange={(value: any) => setSelectedDevice(value)}
+                >
                   <SelectTrigger className="w-[300px]">
                     <SelectValue placeholder="Выберите камеру" />
                   </SelectTrigger>
@@ -196,12 +224,12 @@ export default function Home() {
 
               {selectedDevice && (
                 <div className="flex-row">
-                  <Button onClick={() => onStartStream()} className="cursor-pointer mr-2">
-                    Начать в реальном времени
+                  <Button onClick={() => onStartRecord()} className="cursor-pointer mr-2" disabled>
+                    Записать видео
                   </Button>
 
-                  <Button onClick={() => onStartRecord()} className="cursor-pointer">
-                    Записать видео
+                  <Button onClick={() => onStartStream()} className="cursor-pointer" disabled>
+                    Начать в реальном времени
                   </Button>
                 </div>
               )}
@@ -211,7 +239,13 @@ export default function Home() {
               <div className="grid w-full max-w-sm items-center gap-3">
                 <Label htmlFor="video">Ваше видео</Label>
                 <div className="flex">
-                  <Input id="video" type="file" ref={fileInputRef} onChange={handleFileChange} />
+                  <Input
+                    id="video"
+                    accept=".mp4,.m4v,video/mp4,video/mp4v,video/m4v"
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFileChange}
+                  />
                   {selectedFile && (
                     <Button
                       variant="outline"
@@ -223,12 +257,28 @@ export default function Home() {
                     </Button>
                   )}
                 </div>
+                {selectedFile && (
+                  <Button
+                    onClick={() => onFileUpload()}
+                    className="cursor-pointer"
+                    disabled={isUploading}
+                  >
+                    {isUploading ? (
+                      <div className="flex items-center">
+                        <span className="mr-1">Обработка</span>
+                        <Spinner className="size-4 " />
+                      </div>
+                    ) : (
+                      'Обработать'
+                    )}
+                  </Button>
+                )}
               </div>
             </div>
           ) : (
             <div className="flex flex-col items-center gap-4 h-full">
               <div className="flex flex-row items-center gap-4">
-                <div>
+                {/* <div>
                   <h4 className="mb-2">Исходный поток</h4>
                   <video
                     ref={videoRef}
@@ -237,10 +287,10 @@ export default function Home() {
                     muted
                     style={{ width: '100%', maxWidth: '600px' }}
                   />
-                </div>
+                </div> */}
 
                 <div>
-                  <h4 className="mb-2">Обработанный поток</h4>
+                  <h4 className="mb-2">Обработанное видео</h4>
                   <video
                     ref={remoteVideoRef}
                     autoPlay
